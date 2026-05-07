@@ -1,0 +1,58 @@
+[
+  {
+    "action": "create",
+    "className": "Model",
+    "name": "AI_TestHouse",
+    "parent": "Workspace"
+  },
+  {
+    "action": "create",
+    "className": "Part",
+    "name": "Floor",
+    "parent": "Workspace.AI_TestHouse",
+    "properties": {
+      "Size": { "_type": "Vector3", "X": 20, "Y": 1, "Z": 20 },
+      "Position": { "_type": "Vector3", "X": 0, "Y": 0.5, "Z": 0 },
+      "Color": { "_type": "Color3", "R": 139, "G": 119, "B": 101 },
+      "Anchored": true,
+      "Material": { "_type": "Enum", "EnumType": "Material", "Name": "WoodPlanks" }
+    }
+  },
+  {
+    "action": "create",
+    "className": "Part",
+    "name": "WallFront",
+    "parent": "Workspace.AI_TestHouse",
+    "properties": {
+      "Size": { "_type": "Vector3", "X": 20, "Y": 10, "Z": 1 },
+      "Position": { "_type": "Vector3", "X": 0, "Y": 6, "Z": -10 },
+      "Color": { "_type": "Color3", "R": 245, "G": 245, "B": 245 },
+      "Anchored": true,
+      "Material": { "_type": "Enum", "EnumType": "Material", "Name": "SmoothPlastic" }
+    }
+  },
+  {
+    "action": "create",
+    "className": "Part",
+    "name": "WallBack",
+    "parent": "Workspace.AI_TestHouse",
+    "properties": {
+      "Size": { "_type": "Vector3", "X": 20, "Y": 10, "Z": 1 },
+      "Position": { "_type": "Vector3", "X": 0, "Y": 6, "Z": 10 },
+      "Color": { "_type": "Color3", "R": 245, "G": 245, "B": 245 },
+      "Anchored": true,
+      "Material": { "_type": "Enum", "EnumType": "Material", "Name": "SmoothPlastic" }
+    }
+  },
+  {
+    "action": "create",
+    "className": "PointLight",
+    "name": "HouseLight",
+    "parent": "Workspace.AI_TestHouse.Floor",
+    "properties": {
+      "Brightness": 1.5,
+      "Range": 30,
+      "Color": { "_type": "Color3", "R": 255, "G": 244, "B": 229 }
+    }
+  }
+]

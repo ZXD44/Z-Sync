@@ -1,0 +1,14 @@
+# Dependency
+node_modules/
+package-lock.json
+
+# Projects (Private Data)
+projects/
+
+# Logs & Snapshots
+*.log
+map_context.json
+
+# OS files
+.DS_Store
+Thumbs.db
