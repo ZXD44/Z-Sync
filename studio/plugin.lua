@@ -16,9 +16,9 @@ local HttpService          = game:GetService("HttpService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
 -- ── Configuration ───────────────────────────────────────────────────────────
-local SERVER_URL         = "http://localhost:3000"
-local POLL_INTERVAL      = 1.5
-local AUTO_PUSH_INTERVAL = 5
+local SERVER_URL         = "http://127.0.0.1:3000"
+local POLL_INTERVAL      = 0.5
+local AUTO_PUSH_INTERVAL = 2
 
 -- Services to sync with the local file system
 local SYNC_SERVICES = {
@@ -211,10 +211,34 @@ function Serializer.serialize(instance)
 	return data
 end
 
+local IGNORE_NAMES = { Camera = true, Terrain = true }
+
 function Serializer.serializeTree(root)
 	local data = Serializer.serialize(root)
 	for _, child in ipairs(root:GetChildren()) do
-		table.insert(data.Children, Serializer.serializeTree(child))
+		if not IGNORE_NAMES[child.Name] and not IGNORE_NAMES[child.ClassName] then
+			table.insert(data.Children, Serializer.serializeTree(child))
+		end
+	end
+	return data
+end
+
+local function hasScriptDescendant(instance)
+	if instance:IsA("LuaSourceContainer") then return true end
+	for _, child in ipairs(instance:GetChildren()) do
+		if hasScriptDescendant(child) then return true end
+	end
+	return false
+end
+
+function Serializer.serializeScriptsTree(root)
+	local data = Serializer.serialize(root)
+	for _, child in ipairs(root:GetChildren()) do
+		if not IGNORE_NAMES[child.Name] and not IGNORE_NAMES[child.ClassName] then
+			if hasScriptDescendant(child) then
+				table.insert(data.Children, Serializer.serializeScriptsTree(child))
+			end
+		end
 	end
 	return data
 end
@@ -235,13 +259,12 @@ end
 
 local toolbar = plugin:CreateToolbar("ZXD44")
 
-local pushButton = toolbar:CreateButton("Push", "ส่งข้อมูลแมพไปที่คอม (เขียนไฟล์ลง disk)", "rbxassetid://6031075938")
-local toggleButton = toolbar:CreateButton("Sync", "เปิด/ปิด การรับไฟล์จากคอม (Two-way sync)", "rbxassetid://6031075929")
-local autoPushButton = toolbar:CreateButton("Auto", "ส่งข้อมูลแมพไปที่คอมอัตโนมัติทุก 5 วินาที", "rbxassetid://6031094678")
-local statusButton = toolbar:CreateButton("Status", "เช็คสถานะเซิร์ฟเวอร์และโปรเจกต์", "rbxassetid://6031075931")
+local pushButton = toolbar:CreateButton("Push All", "ส่งข้อมูลทั้งหมดไปที่คอม (รอนานถ้าแมพใหญ่)", "rbxassetid://6031075938")
+local pushScriptsButton = toolbar:CreateButton("Push Scripts", "ส่งเฉพาะสคริปต์ไปที่คอม (รวดเร็ว)", "rbxassetid://6031075938")
+local autoSyncButton = toolbar:CreateButton("Auto-Sync", "เปิด/ปิด ระบบดึงข้อมูลจากคอมอัตโนมัติ", "rbxassetid://6031075929")
+local statusButton = toolbar:CreateButton("Status", "เช็คสถานะเซิร์ฟเวอร์", "rbxassetid://6031075931")
 
-local isSyncing     = false
-local isAutoPushing = false
+local isAutoSyncing = false
 
 -- ═════════════════════════════════════════════════════════════════════════════
 -- HTTP HELPER
@@ -354,7 +377,7 @@ end
 -- ═════════════════════════════════════════════════════════════════════════════
 
 local function pushMapState(silent)
-	if not silent then print("[ZXD44] กำลังแยกองค์ประกอบแมพ...") end
+	if not silent then print("[ZXD44] กำลังรวบรวมข้อมูลแมพทั้งหมด (รอสักครู่)...") end
 
 	local services = {}
 	for _, service in ipairs(SYNC_SERVICES) do
@@ -364,15 +387,38 @@ local function pushMapState(silent)
 	local payload = {
 		timestamp = os.time(),
 		services  = services,
+		mode      = "full",
 	}
 
 	local ok, res = httpRequest("POST", "/sync", payload)
 	if ok then
-		if not silent then
-			print("[ZXD44] [OK] บันทึกแมพสำเร็จ!")
-		end
+		if not silent then print("✅ [ZXD44] บันทึกข้อมูลแมพทั้งหมดเสร็จสิ้นแล้ว!") end
 	else
-		warn("[ZXD44] [X] ส่งข้อมูลไม่สำเร็จ - เซิร์ฟเวอร์รันอยู่หรือไม่?")
+		warn("❌ [ZXD44] ส่งข้อมูลไม่สำเร็จ! กรุณาตรวจสอบว่ารันโปรแกรมในคอมหรือยัง?")
+	end
+end
+
+local function pushScriptsState(silent)
+	if not silent then print("[ZXD44] กำลังค้นหาและส่งเฉพาะสคริปต์ (ความเร็วสูง)...") end
+
+	local services = {}
+	for _, service in ipairs(SYNC_SERVICES) do
+		if hasScriptDescendant(service) then
+			services[service.Name] = Serializer.serializeScriptsTree(service)
+		end
+	end
+
+	local payload = {
+		timestamp = os.time(),
+		services  = services,
+		mode      = "scripts",
+	}
+
+	local ok, res = httpRequest("POST", "/sync", payload)
+	if ok then
+		if not silent then print("✅ [ZXD44] บันทึกสคริปต์ลงคอมเสร็จสิ้นแล้ว!") end
+	else
+		warn("❌ [ZXD44] ส่งข้อมูลไม่สำเร็จ! กรุณาตรวจสอบว่ารันโปรแกรมในคอมหรือยัง?")
 	end
 end
 
@@ -380,41 +426,38 @@ end
 -- SYNC / AUTO-PUSH LOOPS
 -- ═════════════════════════════════════════════════════════════════════════════
 
-local function startSyncLoop()
-	isSyncing = true
-	toggleButton:SetActive(true)
-	print("[ZXD44] [>] เริ่มระบบ Sync (รับไฟล์ทุกๆ "..POLL_INTERVAL.." วินาที)")
-	while isSyncing do
-		local ok, res = httpRequest("GET", "/sync")
-		if ok and type(res) == "table" and res.actions then
-			for _, action in ipairs(res.actions) do
-				processAction(action)
+local function startAutoSync()
+	if isAutoSyncing then return end
+	isAutoSyncing = true
+	autoSyncButton:SetActive(true)
+	print("[ZXD44] [*] เริ่มระบบ Auto-Sync (ดึงข้อมูลจากคอม -> เข้าเกม)")
+	
+	-- Sync Loop (ดึงข้อมูลจากคอม)
+	task.spawn(function()
+		while isAutoSyncing do
+			local ok, res = httpRequest("GET", "/sync")
+			if ok and type(res) == "table" then
+				if res.ignore then
+					IGNORE_NAMES = {}
+					for _, name in ipairs(res.ignore) do
+						IGNORE_NAMES[name] = true
+					end
+				end
+				if res.actions then
+					for _, action in ipairs(res.actions) do
+						processAction(action)
+					end
+				end
 			end
+			task.wait(POLL_INTERVAL)
 		end
-		task.wait(POLL_INTERVAL)
-	end
+	end)
 end
 
-local function stopSyncLoop()
-	isSyncing = false
-	toggleButton:SetActive(false)
-	print("[ZXD44] [.] หยุดระบบ Sync")
-end
-
-local function startAutoPushLoop()
-	isAutoPushing = true
-	autoPushButton:SetActive(true)
-	print("[ZXD44] [*] เริ่มระบบ Auto-Push (ส่งไฟล์ทุกๆ "..AUTO_PUSH_INTERVAL.." วินาที)")
-	while isAutoPushing do
-		pushMapState(true)
-		task.wait(AUTO_PUSH_INTERVAL)
-	end
-end
-
-local function stopAutoPushLoop()
-	isAutoPushing = false
-	autoPushButton:SetActive(false)
-	print("[ZXD44] [.] หยุดระบบ Auto-Push")
+local function stopAutoSync()
+	isAutoSyncing = false
+	autoSyncButton:SetActive(false)
+	print("[ZXD44] [.] หยุดระบบ Auto-Sync")
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -427,8 +470,7 @@ local function checkStatus()
 		print("--------------------------------")
 		print("[ZXD44] เซิร์ฟเวอร์: " .. (res.server or "Roblox Bridge"))
 		print("[ZXD44] โปรเจกต์: " .. (res.project or "?"))
-		print("[ZXD44] ระบบ Sync: " .. (isSyncing and "[เปิดอยู่]" or "[ปิดอยู่]"))
-		print("[ZXD44] Auto-Push: " .. (isAutoPushing and "[เปิดอยู่]" or "[ปิดอยู่]"))
+		print("[ZXD44] ระบบ Auto-Sync: " .. (isAutoSyncing and "[เปิดอยู่]" or "[ปิดอยู่]"))
 		print("[ZXD44] ที่อยู่โฟลเดอร์: " .. (res.projectDir or "?"))
 		print("[ZXD44] รันมาแล้ว: " .. ("%.1f วินาที"):format(res.uptime or 0))
 		print("[ZXD44] คำสั่งค้าง: " .. (res.pendingActions or 0))
@@ -447,17 +489,14 @@ end
 -- ═════════════════════════════════════════════════════════════════════════════
 
 pushButton.Click:Connect(function() pushMapState(false) end)
-toggleButton.Click:Connect(function()
-	if isSyncing then stopSyncLoop() else task.spawn(startSyncLoop) end
-end)
-autoPushButton.Click:Connect(function()
-	if isAutoPushing then stopAutoPushLoop() else task.spawn(startAutoPushLoop) end
+pushScriptsButton.Click:Connect(function() pushScriptsState(false) end)
+autoSyncButton.Click:Connect(function()
+	if isAutoSyncing then stopAutoSync() else startAutoSync() end
 end)
 statusButton.Click:Connect(function() checkStatus() end)
 
 plugin.Unloading:Connect(function()
-	isSyncing = false
-	isAutoPushing = false
+	isAutoSyncing = false
 end)
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -466,9 +505,12 @@ end)
 print("================================")
 print("[ZXD44] ปลั๊กอินทำงานแล้ว! v2.0")
 print("[ZXD44] เซิร์ฟเวอร์: "..SERVER_URL)
-print("[ZXD44] Push      = ส่งข้อมูลแมพลงคอม")
-print("[ZXD44] Sync      = เปิดรับไฟล์จากคอม")
-print("[ZXD44] Auto      = ส่งข้อมูลอัตโนมัติ")
+print("[ZXD44] Push All      = ส่งข้อมูลทั้งหมด (ช้า)")
+print("[ZXD44] Push Scripts  = ส่งเฉพาะสคริปต์ (เร็วมาก)")
+print("[ZXD44] Auto-Sync     = ดึงสคริปต์อัตโนมัติ")
 print("================================")
+
+-- เปิดระบบ Auto-Sync ให้ทันทีที่ปลั๊กอินเริ่มทำงาน
+task.spawn(startAutoSync)
 
 

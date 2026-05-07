@@ -1,6 +1,6 @@
 {
   "name": "z-sync",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Z-Sync - Real-Time Bidirectional Sync for Roblox Studio",
   "main": "core/main.js",
   "scripts": {

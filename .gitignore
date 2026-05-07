@@ -1,14 +1,17 @@
-# Dependency
+# Dependencies
 node_modules/
 package-lock.json
 
-# Projects (Private Data)
+# Environment
+.env
+.env.local
+
+# Projects & Data
+# เราจะข้ามโฟลเดอร์โปรเจกต์เพื่อให้ Git ติดตามแค่ตัวโปรแกรม Z-Sync เท่านั้น
 projects/
 
-# Logs & Snapshots
+# Snapshots & Logs
 *.log
 map_context.json
-
-# OS files
 .DS_Store
 Thumbs.db

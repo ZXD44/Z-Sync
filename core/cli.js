@@ -53,7 +53,7 @@ async function main() {
             message: 'ระบุชื่อโปรเจกต์ใหม่:',
             validate: value => value.length > 0 ? true : 'ห้ามเว้นว่างเด็ดขาด!'
         });
-        
+
         if (!newProj.name) {
             console.log('\n 👋 [Z-Sync] ยกเลิกการสร้างโปรเจกต์\n');
             process.exit(0);
@@ -66,18 +66,18 @@ async function main() {
     // เคลียร์ Port 3000
     try {
         require('child_process').execSync('for /f "tokens=5" %a in (\'netstat -aon ^| findstr :3000\') do taskkill /f /pid %a >nul 2>&1');
-    } catch(e) {}
+    } catch (e) { }
 
     // 1. ล้างปลั๊กอินเก่าๆ ออกให้หมดเพื่อป้องกันบัค
     const pluginsRoot = path.join(process.env.LOCALAPPDATA, 'Roblox', 'Plugins');
     const oldFolders = ['AIBridge', 'ZXD44', 'Z-Sync'];
-    
+
     oldFolders.forEach(folder => {
         const oldPath = path.join(pluginsRoot, folder);
         if (fs.existsSync(oldPath)) {
             try {
                 fs.rmSync(oldPath, { recursive: true, force: true });
-            } catch(e) {
+            } catch (e) {
                 console.log(`  [!] ไม่สามารถลบโฟลเดอร์เก่า ${folder} ได้ (อาจเปิด Studio ค้างไว้)`);
             }
         }
@@ -90,13 +90,13 @@ async function main() {
     }
     const pluginSource = path.join(__dirname, '..', 'studio', 'plugin.lua');
     const pluginDest = path.join(pluginDir, 'init.server.lua');
-    
+
     // อ่านโค้ดปลั๊กอินมาแก้ไขเลขเวอร์ชันก่อนบันทึก
     let pluginCode = fs.readFileSync(pluginSource, 'utf-8');
     pluginCode = pluginCode.replace(/v\d+\.\d+\.\d+/g, `v${pkg.version}`);
-    
+
     fs.writeFileSync(pluginDest, pluginCode);
-    console.log(`  [OK] ติดตั้งปลั๊กอิน Z-Sync v${pkg.version} เรียบร้อยแล้ว`);
+    console.log(` [OK] ติดตั้งปลั๊กอิน Z-Sync v${pkg.version} เรียบร้อยแล้ว`);
 
     // รัน main.js
     const serverProcess = spawn('node', [path.join(__dirname, 'main.js'), selectedProject], {

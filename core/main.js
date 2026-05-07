@@ -9,21 +9,21 @@
  */
 
 const express = require('express');
-const cors    = require('cors');
-const fs      = require('fs');
-const path    = require('path');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const chokidar = require('chokidar');
 
 // ── CLI Args ────────────────────────────────────────────────────────────────
 const projectName = process.argv[2] || 'default';
-const PORT        = 3000;
+const PORT = 3000;
 
 // ── Paths ───────────────────────────────────────────────────────────────────
-const CORE_DIR    = __dirname;
-const ROOT_DIR    = path.join(CORE_DIR, '..');
-const PROJECTS    = path.join(ROOT_DIR, 'projects');
+const CORE_DIR = __dirname;
+const ROOT_DIR = path.join(CORE_DIR, '..');
+const PROJECTS = path.join(ROOT_DIR, 'projects');
 const PROJECT_DIR = path.join(PROJECTS, projectName);
-const SRC_DIR     = path.join(PROJECT_DIR, 'src');
+const SRC_DIR = path.join(PROJECT_DIR, 'src');
 const ACTIONS_DIR = path.join(PROJECT_DIR, 'actions');
 
 // Services that are synced between Studio and disk
@@ -40,9 +40,9 @@ const SYNC_SERVICES = [
 ];
 
 // ── State ───────────────────────────────────────────────────────────────────
-let actionQueue  = [];
+let actionQueue = [];
 let recentWrites = new Set();   // our own disk writes -> ignore in watcher
-let watcher      = null;
+let watcher = null;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 1.  PROJECT SETUP
@@ -63,6 +63,21 @@ function initProject() {
       syncServices: SYNC_SERVICES,
     }, null, 2));
   }
+
+  const syncIgnoreFile = path.join(PROJECT_DIR, '.syncignore');
+  if (!fs.existsSync(syncIgnoreFile)) {
+    const defaultIgnore = `# รายชื่อคลาสหรือไอเทมที่ไม่ต้องการให้ระบบ Z-Sync บันทึกลงคอม
+# บรรทัดที่ขึ้นต้นด้วย # คือคอมเมนต์
+
+# คลาสพื้นฐานของเกมที่ไม่จำเป็นต้องเซฟ
+Camera
+Terrain
+
+# ตัวอย่าง: หากไม่ต้องการเซฟโฟลเดอร์ต้นไม้ชื่อ Trees_Environment ให้ลบเครื่องหมาย # หน้าบรรทัดล่างออก
+# Trees_Environment
+`;
+    fs.writeFileSync(syncIgnoreFile, defaultIgnore, 'utf-8');
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -74,8 +89,8 @@ function isScript(cls) {
 }
 
 function luaExt(cls) {
-  if (cls === 'Script')       return '.server.lua';
-  if (cls === 'LocalScript')  return '.client.lua';
+  if (cls === 'Script') return '.server.lua';
+  if (cls === 'LocalScript') return '.client.lua';
   if (cls === 'ModuleScript') return '.module.lua';
   return '.lua';
 }
@@ -105,25 +120,50 @@ function ownWrite(p) {
 // 3.  WRITE ROBLOX TREE -> DISK
 // ═════════════════════════════════════════════════════════════════════════════
 
-function clearDir(dir) {
+function clearDir(dir, mode) {
   if (!fs.existsSync(dir)) return;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     ownWrite(full);
-    if (entry.isDirectory()) {
-      fs.rmSync(full, { recursive: true, force: true });
+
+    if (mode === 'scripts') {
+      if (entry.isDirectory()) {
+        clearDir(full, mode);
+        // Do not remove directory itself
+      } else if (full.endsWith('.lua')) {
+        fs.unlinkSync(full);
+      }
     } else {
-      fs.unlinkSync(full);
+      if (entry.isDirectory()) {
+        fs.rmSync(full, { recursive: true, force: true });
+      } else {
+        fs.unlinkSync(full);
+      }
     }
   }
 }
 
-function writeInstance(baseDir, inst) {
+function writeInstance(baseDir, inst, mode) {
   if (!inst || !inst.ClassName) return;
-  const name        = inst.Name || inst.ClassName;
+  let baseNameStr = inst.Name || inst.ClassName;
   const hasChildren = inst.Children && inst.Children.length > 0;
-  const script      = isScript(inst.ClassName);
-  const source      = (inst.Properties && inst.Properties.Source) || '';
+  const script = isScript(inst.ClassName);
+  const source = (inst.Properties && inst.Properties.Source) || '';
+
+  // ฟังก์ชันเช็คว่าชื่อนี้จะถูกเขียนลง Path ไหน
+  const getPath = (n) => {
+    if (script && !hasChildren) return path.join(baseDir, n + luaExt(inst.ClassName));
+    else if (!script && !hasChildren) return path.join(baseDir, n + '.json');
+    else return path.join(baseDir, n); // Folders
+  };
+
+  // Auto-Rename (เติมเลขต่อท้ายถ้าชื่อซ้ำ)
+  let name = baseNameStr;
+  let counter = 2;
+  while (fs.existsSync(getPath(name))) {
+    name = `${baseNameStr} (${counter})`;
+    counter++;
+  }
 
   if (script && !hasChildren) {
     // Simple script -> single .lua file
@@ -138,22 +178,27 @@ function writeInstance(baseDir, inst) {
     const fp = path.join(dir, 'init' + luaExt(inst.ClassName));
     ownWrite(fp);
     fs.writeFileSync(fp, source, 'utf-8');
-    for (const child of inst.Children) writeInstance(dir, child);
+    for (const child of inst.Children) writeInstance(dir, child, mode);
 
   } else if (hasChildren) {
     // Container (Model/Folder/etc) -> folder + init.json
     const dir = path.join(baseDir, name);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const props = { ...(inst.Properties || {}) };
+
+    // Write init.json even in scripts mode to maintain structure
     if (Object.keys(props).length > 0 || inst.ClassName !== 'Folder') {
       const fp = path.join(dir, 'init.json');
       ownWrite(fp);
       fs.writeFileSync(fp, JSON.stringify({ ClassName: inst.ClassName, Properties: props }, null, 2));
     }
-    for (const child of inst.Children) writeInstance(dir, child);
+    for (const child of inst.Children) writeInstance(dir, child, mode);
 
   } else {
     // Leaf instance -> .json
+    // Skip writing non-script leaf nodes if in scripts-only mode
+    if (mode === 'scripts') return;
+
     const fp = path.join(baseDir, name + '.json');
     ownWrite(fp);
     fs.writeFileSync(fp, JSON.stringify({
@@ -168,9 +213,9 @@ function writeInstance(baseDir, inst) {
 // ═════════════════════════════════════════════════════════════════════════════
 
 function fileToRobloxPath(filePath) {
-  const rel   = path.relative(SRC_DIR, filePath);
+  const rel = path.relative(SRC_DIR, filePath);
   const parts = rel.split(path.sep);
-  const out   = [];
+  const out = [];
   for (const p of parts) {
     if (p === 'init.json' || p.startsWith('init.')) continue;
     if (p === '_meta.json') continue;
@@ -186,7 +231,37 @@ function startWatcher() {
     ignoreInitial: true,
     ignored: /(^|[\\/])\../,
     persistent: true,
-    awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 },
+    usePolling: true,
+    interval: 100,
+    awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
+  });
+
+  watcher.on('add', (fp) => {
+    if (recentWrites.has(path.resolve(fp))) return;
+    const rPath = fileToRobloxPath(fp);
+    if (!rPath) return;
+
+    const parts = rPath.split('.');
+    const name = parts.pop();
+    const parentPath = parts.join('.') || 'Workspace';
+
+    if (fp.endsWith('.lua')) {
+      let cls = 'ModuleScript';
+      if (fp.endsWith('.server.lua')) cls = 'Script';
+      else if (fp.endsWith('.client.lua')) cls = 'LocalScript';
+
+      const src = fs.readFileSync(fp, 'utf-8');
+      actionQueue.push({ action: 'create', parent: parentPath, name: name, className: cls, properties: { Source: src } });
+      console.log(` [สร้าง] สคริปต์: ${rPath}`);
+    } else if (fp.endsWith('.json') && !fp.endsWith('project.json')) {
+      try {
+        const data = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+        if (data.ClassName) {
+          actionQueue.push({ action: 'create', parent: parentPath, name: name, className: data.ClassName, properties: data.Properties || {} });
+          console.log(` [สร้าง] อ็อบเจกต์: ${rPath}`);
+        }
+      } catch (_) { /* skip bad json */ }
+    }
   });
 
   watcher.on('change', (fp) => {
@@ -238,7 +313,7 @@ function loadFileActions() {
         console.log('  [Actions] Loaded:', file);
       } catch (e) { console.error(` [!] ไฟล์ Action มีปัญหา: ${file}`, e.message); }
     }
-  } catch (_) {}
+  } catch (_) { }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -249,12 +324,20 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 
+function getIgnoreList() {
+  const p = path.join(PROJECT_DIR, '.syncignore');
+  if (!fs.existsSync(p)) return ["Camera", "Terrain"];
+  const content = fs.readFileSync(p, 'utf-8');
+  const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  return [...new Set(["Camera", "Terrain", ...lines])];
+}
+
 // GET /sync  -- Plugin polls for pending actions
 app.get('/sync', (req, res) => {
   loadFileActions();
   const pending = [...actionQueue];
   actionQueue = [];
-  res.json({ success: true, project: projectName, actions: pending });
+  res.json({ success: true, project: projectName, actions: pending, ignore: getIgnoreList() });
   if (pending.length) console.log(` [Sync] ส่งออก ${pending.length} คำสั่ง`);
 });
 
@@ -265,18 +348,20 @@ app.post('/sync', (req, res) => {
     return res.status(400).json({ success: false, error: 'Missing services object' });
   }
 
+  const mode = body.mode || 'full';
   let totalFiles = 0;
+  
   for (const [serviceName, tree] of Object.entries(body.services)) {
     const serviceDir = path.join(SRC_DIR, serviceName);
     if (!fs.existsSync(serviceDir)) fs.mkdirSync(serviceDir, { recursive: true });
 
-    // Clear existing files for this service
-    clearDir(serviceDir);
+    // Clear existing files for this service based on mode
+    clearDir(serviceDir, mode);
 
     // Write children of the service (not the service itself)
     if (tree && tree.Children) {
       for (const child of tree.Children) {
-        writeInstance(serviceDir, child);
+        writeInstance(serviceDir, child, mode);
         totalFiles++;
       }
     }
@@ -287,8 +372,8 @@ app.post('/sync', (req, res) => {
   ownWrite(ctxPath);
   fs.writeFileSync(ctxPath, JSON.stringify({ receivedAt: new Date().toISOString(), data: body }, null, 2));
 
-  console.log(` [Push] บันทึกไฟล์ลง Disk: ${totalFiles} รายการ`);
-  res.json({ success: true, message: `Project "${projectName}" synced`, totalFiles });
+  console.log(` [Push] บันทึกไฟล์ลง Disk เสร็จสมบูรณ์แล้ว! (${totalFiles} รายการ)`);
+  res.json({ success: true, message: `Project "${projectName}" push complete`, totalFiles });
 });
 
 // POST /action -- AI or external tool pushes actions
@@ -321,7 +406,7 @@ app.get('/projects', (req, res) => {
     .map(d => {
       const pj = path.join(PROJECTS, d.name, 'project.json');
       let meta = {};
-      try { meta = JSON.parse(fs.readFileSync(pj, 'utf-8')); } catch (_) {}
+      try { meta = JSON.parse(fs.readFileSync(pj, 'utf-8')); } catch (_) { }
       return { name: d.name, ...meta };
     });
   res.json({ projects: dirs });
