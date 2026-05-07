@@ -335,8 +335,9 @@ initProject();
 startWatcher();
 
 app.listen(PORT, () => {
+  const pkg = require('../package.json');
   console.log('\n ==============================');
-  console.log('   Z-Sync Server v2.0');
+  console.log(`   Z-Sync Server v${pkg.version}`);
   console.log(' ==============================');
   console.log(`  โปรเจกต์ : ${projectName}`);
   console.log(`  ที่อยู่   : ${PROJECT_DIR}`);
